@@ -1,0 +1,783 @@
+---
+title: "oscc_seer2"
+author: "Nandu Meshram"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(error = TRUE)
+```
+
+```{r}
+# open libraries
+
+library(package = "tidyverse")
+library(package = "haven")
+library(package = "labelled")
+library(package = "table1")
+library(package = "descr")
+library(package = "ggplot2")
+
+# Import oral cancer SEER data
+
+oscc <- read.csv("C:/Nandu/MPH3Semester/ADA/Final Project Presentation/Final_presentation_Datasets/oscc_seer_final.csv")
+
+summary(object = oscc)
+```
+
+```{r}
+# create a codebook for the oral cancer SEER data.
+codebook.oscc <- generate_dictionary(data = oscc)
+codebook.oscc
+```
+
+```{r}
+# Reload dplyr to ensure the correct version is active
+library(dplyr)
+
+# Clean and transform the dataset
+oscc.cleaned <- oscc %>%
+  dplyr::select(
+    Derived.AJCC.Stage.Group..6th.ed..2004.2015., 
+    Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x,
+    Age.recode.with.single.ages.and.85., 
+    Sex.x, 
+    Marital.status.at.diagnosis.x, 
+    Site.rec.ICD.O.3.WHO.2008..individual.sites.only., 
+    Median.household.income.inflation.adj.to.2022.x
+  ) %>%
+  zap_labels()  # Remove unused labels (if applicable)
+
+```
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+
+# Clean and transform the dataset
+oscc.cleaned <- oscc %>%
+  dplyr::select(
+    Derived.AJCC.Stage.Group..6th.ed..2004.2015., 
+    Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x,
+    Age.recode.with.single.ages.and.85., 
+    Sex.x, 
+    Marital.status.at.diagnosis.x, 
+    Site.rec.ICD.O.3.WHO.2008..individual.sites.only., 
+    Median.household.income.inflation.adj.to.2022.x
+  ) %>%
+  zap_labels() %>%  # Remove unused labels (if applicable)
+  
+  # Recode variables
+  mutate(
+    # Recode AJCC stage variable
+    Derived.AJCC.Stage.Group..6th.ed..2004.2015. = recode_factor(
+      Derived.AJCC.Stage.Group..6th.ed..2004.2015.,
+      `I` = "Early",
+      `II` = "Early",
+      `III` = "Late",
+      `IVA` = "Late",
+      `IVB` = "Late",
+      `IVC` = "Late",
+      `IVNOS` = "Late"
+    ),
+    
+    # Convert Stage to numeric binary: Early (0) vs Late (1)
+    Stage_Binary = ifelse(
+      Derived.AJCC.Stage.Group..6th.ed..2004.2015. == "Late", 1, 0
+    ),
+    
+    # Recode Race variable
+    Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x = recode_factor(
+      Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x,
+      `1` = "Non-Hispanic White",
+      `2` = "Non-Hispanic Black",
+      `3` = "Non-Hispanic American Indian/Alaska Native",
+      `4` = "Non-Hispanic Asian or Pacific Islander",
+      `5` = "Hispanic (All Races)"
+    ),
+    
+    # Recode Sex variable
+    Sex.x = recode_factor(Sex.x,
+                          `1` = "Male",
+                          `0` = "Female"),
+    
+    # Recode Marital Status variable
+    Marital.status.at.diagnosis.x = recode_factor(
+      Marital.status.at.diagnosis.x,
+      `1` = "Married",
+      `2` = "Single",
+      `3` = "Separated",
+      `4` = "Divorced",
+      `5` = "Widowed",
+      `9` = "Unknown"
+    ),
+    
+    # Recode Site variable
+    Site.rec.ICD.O.3.WHO.2008..individual.sites.only. = as.factor(
+      Site.rec.ICD.O.3.WHO.2008..individual.sites.only.
+    ),
+    
+    # Convert Age to numeric (remove "years" if present)
+    Age.recode.with.single.ages.and.85. = as.numeric(
+      gsub(" years", "", Age.recode.with.single.ages.and.85.)
+    ),
+    
+    
+    # Clean and convert Income to numeric
+    Median.household.income.inflation.adj.to.2022.x = as.numeric(
+      gsub("[^0-9.]", "", Median.household.income.inflation.adj.to.2022.x)
+    ),
+    
+    # Categorize Income
+    Income_Category = case_when(
+      Median.household.income.inflation.adj.to.2022.x < 30000 ~ "Low",
+      Median.household.income.inflation.adj.to.2022.x >= 30000 & 
+        Median.household.income.inflation.adj.to.2022.x < 60000 ~ "Medium",
+      Median.household.income.inflation.adj.to.2022.x >= 60000 ~ "High",
+      TRUE ~ NA_character_  # Handle unexpected or missing values
+    )
+  )
+
+# View the cleaned dataset
+head(oscc.cleaned)
+
+
+```
+
+```{r}
+colnames(oscc.cleaned)
+```
+
+```{r}
+library(tidyr)
+
+# Remove rows with missing or problematic values in Derived.AJCC.Stage.Group..6th.ed..2004.2015. variable.
+oscc.cleaned <- oscc.cleaned %>%
+  drop_na(Derived.AJCC.Stage.Group..6th.ed..2004.2015.) %>%  # Drop rows with NA in AJCC Stage
+  filter(
+    Derived.AJCC.Stage.Group..6th.ed..2004.2015. != "Blank(s)",    # Remove blank entries
+    Derived.AJCC.Stage.Group..6th.ed..2004.2015. != "UNK Stage",   # Remove "UNK Stage"
+    )
+
+```
+
+```{r}
+# Remove rows with missing or problematic values in Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x variable.
+oscc.cleaned <- oscc.cleaned %>%
+  drop_na(Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x) %>%  # Drop rows with "Unknown Race" in Race column.
+  filter(
+        Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x != "Non-Hispanic Unknown Race"  # Remove rows with unknown race
+  )
+```
+
+```{r}
+# Load necessary packages
+library(dplyr)
+library(table1)
+
+# Define custom labels for variables
+label(oscc.cleaned$Derived.AJCC.Stage.Group..6th.ed..2004.2015.) <- "AJCC Stage"
+label(oscc.cleaned$Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x) <- "Race and Ethnicity"
+label(oscc.cleaned$Age.recode.with.single.ages.and.85.) <- "Age"
+label(oscc.cleaned$Sex.x) <- "Gender"
+label(oscc.cleaned$Marital.status.at.diagnosis.x) <- "Marital Status"
+label(oscc.cleaned$Site.rec.ICD.O.3.WHO.2008..individual.sites.only.) <- "Tumor Site"
+label(oscc.cleaned$Median.household.income.inflation.adj.to.2022.x) <- "Household Income (2022 Adjusted)"
+
+# Create a descriptive table using table1 with custom labels
+seer_oscc_tb1 <- table1(
+  ~ Derived.AJCC.Stage.Group..6th.ed..2004.2015. + 
+    Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x + 
+    Age.recode.with.single.ages.and.85. + 
+    Sex.x + 
+    Marital.status.at.diagnosis.x + 
+    Site.rec.ICD.O.3.WHO.2008..individual.sites.only. + 
+    Median.household.income.inflation.adj.to.2022.x | 
+    Derived.AJCC.Stage.Group..6th.ed..2004.2015.,  # Stratify by AJCC Stage
+  data = oscc.cleaned,
+  overall = "Overall",
+  caption = "Descriptive Statistics by AJCC Stage",
+  render.continuous = c(.="Median [Q1, Q3]", .="Mean (SD)")
+)
+
+# Display the descriptive table
+seer_oscc_tb1
+
+```
+
+```{r}
+pacman::p_load(flextable) #download/load flextable
+
+seer_oscc_tb1<-as.data.frame(seer_oscc_tb1) #flextable requires table type is a data frame first.
+
+seer_oscc_ft1<-flextable(seer_oscc_tb1) #this functions saves it as a flextable.
+
+seer_oscc_ft1 <- set_table_properties(seer_oscc_ft1, align ="right", layout = "autofit") #here you can change properties
+seer_oscc_ft1
+save_as_docx("SEER Oral Cancer Table 1" = seer_oscc_ft1,
+path = "C:/Nandu/MPH3Semester/ADA/Final Project Presentation/seer_oscc_ft1.docx") 
+```
+
+```{r}
+# Install and load necessary packages
+install.packages("pacman")
+pacman::p_load(tidyverse, readr, table1, DiagrammeR, rsvg)
+
+# Create flow chart using grViz
+figure1 <- grViz("
+digraph flowchart { 
+      
+      # Node definitions with substituted label text
+      node [fontname = Helvetica, shape = rectangle, fontsize=10] 
+      
+      # Define the nodes
+      node1 [label = 'Records received from SEER for oral cancer diagnoses n = 23,264']
+      node2 [label = 'Excluding 13,226 with Blank(s), Unknown Stage, and NA in the Stage column n = 9,938']
+      node3 [label = 'Excluding 206 individuals with Non-Hispanic Unknown Race n = 9,904']
+      
+      # Edge definitions
+      node1 -> node2 -> node3
+}
+")
+
+# Render the diagram
+figure1
+
+```
+
+```{r}
+#Exporting figure1
+
+figure1 %>%
+  DiagrammeRsvg::export_svg() %>% 
+  charToRaw() %>% 
+  rsvg::rsvg_pdf("Figure 1.pdf")
+```
+
+```{r}
+# Summarize by Race
+summary <- oscc.cleaned %>%
+  group_by(Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x) %>%
+  summarise(
+    Total = n(),
+    Late_Stage = sum(Stage_Binary, na.rm = TRUE),  # Sum of Late stages
+    Late_Stage_Percentage = mean(Stage_Binary, na.rm = TRUE) * 100  # Percentage of Late stages
+  )
+
+# View the summary table
+print(summary)
+```
+
+```{r}
+# Visualize with bar plots
+ggplot(summary, aes(x = Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x, y = Late_Stage_Percentage)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Relationship between Late-stage Diagnosis of Oral malignancies and Race/Ethnicity",
+       x = "Race/Ethnicity",
+       y = "Late-Stage Diagnoses (%)")
+```
+
+```{r}
+# Load necessary library
+library(ggplot2)
+
+# Summarize the data by gender for late-stage diagnosis
+gender_summary <- oscc.cleaned %>%
+  group_by(Sex.x) %>%
+  summarise(
+    Total = n(),
+    Late_Stage = sum(Stage_Binary, na.rm = TRUE),  # Sum of late-stage cases
+    Late_Stage_Percentage = mean(Stage_Binary, na.rm = TRUE) * 100  # Percentage of late-stage cases
+  )
+
+# View the summarized data
+print(gender_summary)
+
+# Plot the bar graph
+ggplot(gender_summary, aes(x = Sex.x, y = Late_Stage_Percentage, fill = Sex.x)) +
+  geom_bar(stat = "identity", width = 0.6, color = "black") +
+  labs(
+    title = "Relationship of Gender with Late-Stage Diagnosis of Oral Cancer",
+    x = "Gender",
+    y = "Late-Stage Diagnosis (%)"
+  ) +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "pink")) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold")
+  )
+
+```
+
+```{r}
+# Load necessary library
+library(ggplot2)
+
+# Summarize the data by gender and race for late-stage diagnosis
+gender_race_summary <- oscc.cleaned %>%
+  group_by(Sex.x, Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x) %>%
+  summarise(
+    Total = n(),
+    Late_Stage = sum(Stage_Binary, na.rm = TRUE),  # Sum of late-stage cases
+    Late_Stage_Percentage = mean(Stage_Binary, na.rm = TRUE) * 100  # Percentage of late-stage cases
+  )
+
+# View the summarized data
+print(gender_race_summary)
+
+# Plot the grouped bar graph
+ggplot(gender_race_summary, aes(x = Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x, 
+                                y = Late_Stage_Percentage, 
+                                fill = Sex.x)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black", width = 0.7) +
+  labs(
+    title = "Relationship Between Gender, Race, and Late-Stage Diagnosis of Oral Cancer",
+    x = "Race/Ethnicity",
+    y = "Late-Stage Diagnosis (%)",
+    fill = "Gender"
+  ) +
+  scale_fill_manual(values = c("Male" = "blue", "Female" = "pink")) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    legend.position = "top"
+  )
+
+```
+
+```{r}
+library(ggplot2)
+
+# Boxplot of stage at diagnosis by age
+ggplot(oscc.cleaned, aes(x = Derived.AJCC.Stage.Group..6th.ed..2004.2015., 
+                         y = Age.recode.with.single.ages.and.85.)) +
+  geom_boxplot(fill = "lightblue", color = "blue") +
+  labs(
+    title = "Relationship of Stage at Diagnosis with Age",
+    x = "Stage at Diagnosis",
+    y = "Age"
+  ) +
+  theme_minimal()
+```
+
+#Checking assumptions for the binary logistic regression.
+
+#1. Linearity of logit
+
+```{r}
+# Check linearity of logit for Age and Income
+library(car)
+
+# Create interaction terms with the log-transformed predictors
+oscc.cleaned <- oscc.cleaned %>%
+  mutate(
+    log_age = log(Age.recode.with.single.ages.and.85. + 1),  # Avoid log(0)
+    log_income = log(Median.household.income.inflation.adj.to.2022.x + 1)
+  )
+
+# Fit logistic regression with interaction terms
+linearity_model <- glm(
+  Stage_Binary ~ Age.recode.with.single.ages.and.85. * log_age + 
+    Median.household.income.inflation.adj.to.2022.x * log_income + 
+    Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x +
+    Sex.x +
+    Marital.status.at.diagnosis.x,
+  data = oscc.cleaned,
+  family = "binomial"
+)
+
+# Check p-values for interaction terms
+summary(linearity_model)
+
+```
+
+#Interpretation: The significant interaction term income with its logarithmic transformations suggest violations of the linearity of the logit assumption for income predictor.
+
+#2.Independence of Observations
+
+```{r}
+# Check for duplicate rows
+sum(duplicated(oscc.cleaned))
+
+# Ensure unique patient identifiers
+length(unique(oscc.cleaned$Patient.ID)) == nrow(oscc.cleaned)
+
+```
+
+```{r}
+#Removal of duplicate observations.
+duplicates <- oscc.cleaned[duplicated(oscc.cleaned), ]
+head(duplicates)
+
+```
+
+```{r}
+#Removing duplicate observations from dataset.
+oscc.cleaned <- oscc.cleaned[!duplicated(oscc.cleaned), ]
+
+```
+
+```{r}
+figure1<- grViz(diagram = "digraph flowchart{ # gives beginning of flowchart
+
+      # node definitions with substituted label text
+      
+      node [fontname = Helvetica, shape = rectangle, fontsize=10] 
+      
+      # Define the nodes: nodes indicate how many boxes you will have in your diagram. Since I have three sets of exclusions, I will have four nodes.
+      
+      node1 [label = '@@1'] # starting number
+      node2 [label = '@@2'] # number after exclusion 1
+      node3 [label = '@@3'] # number after exclusion 2
+      node4 [label = '@@4'] # number after removal of duplicates
+      
+      
+      # edge definitions with the node IDs are used to indicate how the rectangle boxes flow from each other. 
+      
+      node1 -> node2 -> node3 -> node4
+}
+      # This set of code provides the text in each rectangle box.
+      [1]: 'Records received from SEER for oral cancer diagnoses n = 23,264'
+      [2]: 'Excluding 13,226 with Blank(s), Unknown Stage, and NA in the Stage column n = 9,938'
+      [3]: 'Excluding 206 individuals with Non-Hispanic Unknown Race n = 9,904'
+      [4]: 'Excluding 3188 duplicate rows n = 6,786'
+      ")
+figure1
+```
+
+#3. Checking multicolliearity.
+
+```{r}
+#Addressing multi-colinearity
+# Select only numeric columns for correlation analysis
+numeric_data <- oscc.cleaned %>%
+  dplyr::select_if(is.numeric)
+
+# Compute correlation matrix
+cor_matrix <- cor(numeric_data, use = "pairwise.complete.obs")
+
+# Display the correlation matrix
+print(cor_matrix)
+```
+
+#No Multicollinearity Concerns: Correlations are far from the threshold of 1. 0.7, 0.8, which typically signals multicollinearity. These variables are safe to include in a regression model without introducing instability.However, there is high correlation between Age.recode.with.single.ages.and.85. and log_age suggests that one of these variables should be removed or adjusted in the model to avoid redundancy.
+
+```{r}
+# If log transformation better represents age, retain log_age
+oscc.cleaned <- oscc.cleaned %>% select(-Age.recode.with.single.ages.and.85.)
+
+```
+
+```{r}
+library(car)
+vif_model <- glm(Stage_Binary ~ Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x + log_age + Median.household.income.inflation.adj.to.2022.x + 
+                            log_income + Sex.x + Marital.status.at.diagnosis.x, 
+                 family = "binomial", data = oscc.cleaned)
+vif(vif_model)
+
+```
+
+#All variables in the model show low VIF values, indicating no significant multicollinearity. The model is statistically robust, and multicollinearity is not a concern for the predictors included.
+
+```{r}
+# Logistic regression
+model <- glm(Stage_Binary ~ Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x + log_age + Sex.x + Marital.status.at.diagnosis.x + Income_Category,
+             data = oscc.cleaned, 
+             family = "binomial")
+
+summary(model)
+
+# Extract Odds Ratios
+exp(cbind(Odds_Ratio = coef(model), confint(model)))
+```
+
+```{r}
+# Calculate Cook's distance
+cooks_distance <- cooks.distance(model)
+
+# View the Cook's distance values
+summary(cooks_distance)
+```
+
+```{r}
+# Plot Cook's distance
+plot(cooks_distance, type = "h", main = "Cook's Distance for Logistic Regression",
+     ylab = "Cook's Distance", xlab = "Observation Number")
+abline(h = 4/length(cooks_distance), col = "red", lty = 2)  # Common threshold line
+
+```
+
+#Interpretation:The maximum Cook's distance is 0.006147, which is well below 1. No observation exceeds the threshold for being highly influential. Therre is no need to remove any observations based on Cook's distance, as no observation is exerting undue influence on the model.
+
+```{r}
+# Test for interaction.
+# Adding interaction term between Race and Sex.
+
+interaction_model <- glm(
+  Stage_Binary ~ Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x * Sex.x + 
+    log_age + 
+    Marital.status.at.diagnosis.x + 
+    Income_Category,
+  data = oscc.cleaned,
+  family = "binomial"
+)
+
+# Summary of the model with interaction
+summary(interaction_model)
+
+```
+
+#Interpretation of interaction model: #Being Non-Hispanic Black significantly increases the odds of a late-stage diagnosis compared to the reference group (likely Non-Hispanic White) (p \< 0.001, OR = 3.11). Other race categories, including Non-Hispanic American Indian/Alaska Native, Non-Hispanic Asian/Pacific Islander, and Hispanic, show no significant main effect except for Hispanic, which has a modestly increased odds ratio (p = 0.01, OR = 1.50). Females have significantly lower odds of late-stage diagnosis compared to males (p \< 0.001, OR = 0.65). Being Married (OR = 0.48) or Single (OR = 0.51) is associated with significantly lower odds of late-stage diagnosis compared to unknown marital status (p \< 0.01). Income category has no significant effect on late-stage diagnosis (e.g., "Medium" income, p = 0.95). #The interaction term Race x Sex:Non-Hispanic Black x Female: This interaction is significant (p \< 0.001, OR = 0.42), suggesting that the protective effect of being female is weaker among Non-Hispanic Blacks compared to the reference group. Other interactions, such as Hispanic x Female, show marginal significance (p = 0.06) but warrant further investigation.Non-Hispanic Asian/Pacific Islander x Female and American Indian/Alaska Native x Female interactions are not significant, suggesting that the sex effect does not differ by race for these groups. #Age (log-transformed): The main effect of age is not significant (p = 0.90), indicating no clear association with late-stage diagnosis.
+
+```{r}
+# Compare models with and without interaction using AIC
+AIC(model, interaction_model)
+
+```
+
+#Interaction Effects Improve the Model: The main model has 14 degrees of freedom, meaning it includes fewer parameters (independent variables) compared to the interaction model. The interaction model has 18 degrees of freedom, indicating additional interaction terms between variables were included in the model.The interaction model has a slightly lower AIC (8551.687) compared to the main model (8560.079), suggesting that the interaction model fits the data better while accounting for model complexity.The difference in AIC between the two models is 8.392 (8560.079 - 8551.687).While this difference is modest, it provides evidence that adding interaction terms improves the model fit.The interaction model outperforms the main model in terms of AIC, suggesting that interactions (e.g., between race and sex) provide meaningful additional explanatory power for predicting late-stage diagnosis. The interaction model is retained as it offers better fit and deeper insights into the relationships between predictors (e.g., race and sex).
+
+```{r}
+library(car)
+vif_model <- lm(Stage_Binary ~ ., data = oscc.cleaned)
+vif(vif_model)
+
+```
+
+```{r}
+library(mice)
+md.pattern(oscc.cleaned)
+
+```
+
+#A large proportion of the data is complete (6,337 rows).A small subset (379 observations) has missing data concentrated in specific variables, like log_age.
+
+```{r}
+library(dplyr)
+
+# Filter only numeric columns
+numeric_data <- oscc.cleaned %>% select_if(is.numeric)
+
+# Check correlation on numeric data
+cor_matrix <- cor(numeric_data, use = "complete.obs")
+
+# View the correlation matrix
+print(cor_matrix)
+
+
+```
+
+```{r}
+# Load the mice package
+library(mice)
+
+# Inspect missing data pattern
+md.pattern(oscc.cleaned)
+
+# Generate the predictor matrix
+predictorMatrix <- make.predictorMatrix(oscc.cleaned)
+
+# Ensure `log_age` exists (if not already present)
+if (!"log_age" %in% colnames(oscc.cleaned)) {
+  oscc.cleaned$log_age <- log(oscc.cleaned$Age.recode.with.single.ages.and.85.)
+}
+
+# Exclude highly correlated variable
+predictorMatrix["log_age"] <- 0
+
+# Set "norm" for log_age and "" for all other variables
+methods <- rep("", ncol(oscc.cleaned))
+methods[which(colnames(oscc.cleaned) == "log_age")] <- "norm"
+
+```
+
+```{r}
+# Fit alternative model
+#Decision tree
+# Load necessary libraries
+library(rpart)
+library(rpart.plot)
+
+# Fit a decision tree model
+tree_model <- rpart(
+  Stage_Binary ~ Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x + 
+    log_age + 
+    Sex.x + 
+    Marital.status.at.diagnosis.x + 
+    Median.household.income.inflation.adj.to.2022.x,
+  data = oscc.cleaned,
+  method = "class"
+)
+
+# Plot the decision tree
+rpart.plot(tree_model, type = 4, extra = 104)
+
+# Evaluate the tree model
+printcp(tree_model)
+
+```
+
+#Interpretation:Sex.x (Gender) is a strong predictor of the outcome, as it is the primary splitting criterion in this decision tree. Males have a slightly higher likelihood of being classified as 1 (55%), whereas females have a higher likelihood of being classified as 0 (57%). The dataset contains more males (63%) than females (37%). This decision tree suggests that Sex.x is a simple yet significant factor in predicting the binary outcome.
+
+```{r}
+#Random forest
+# Load necessary library
+library(randomForest)
+
+# Fit a random forest model
+rf_model <- randomForest(
+  Stage_Binary ~ Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x + 
+        Sex.x + 
+    Marital.status.at.diagnosis.x + 
+    Median.household.income.inflation.adj.to.2022.x,
+  data = oscc.cleaned,
+  ntree = 500,
+  mtry = 3,
+  importance = TRUE
+)
+
+# View model summary
+print(rf_model)
+
+# Variable importance plot
+varImpPlot(rf_model)
+
+```
+
+#Interpretation of forest plot: The forest plot shown represents the variable importance in a Random Forest model. The two panels indicate two different measures of variable importance:Left Panel: %IncMSE (Percentage Increase in Mean Squared Error)This measure shows how much the prediction error (Mean Squared Error) increases when a particular variable is excluded from the model. A higher value indicates that the variable is important for the model's predictive performance.Key Variables:Median.household.income.inflation.adj.to.2022.x: Most important, as removing this variable causes the largest increase in MSE.Marital.status.at.diagnosis.x: Moderately important.Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x: Contributes to a smaller extent.Sex.x: Least impactful on MSE.Right Panel: IncNodePurity (Increase in Node Purity)This measures how much a variable improves the purity of the nodes it splits in the decision trees. Higher values indicate a greater contribution to classifying the data correctly.Key Variables:Median.household.income.inflation.adj.to.2022.x: Largest contributor to node purity.Marital.status.at.diagnosis.x: Next significant contributor.Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x: Moderate contributor.Sex.x: Contributes the least to node purity.Median Household Income is the most important variable in both panels, suggesting it plays a critical role in predicting the outcome.Marital Status is moderately important, reflecting its relevance to the prediction task.Race/Ethnicity and Sex are less important but still contribute to the model.
+
+```{r}
+#Ensuring Stage_Binary variable is a facror.
+oscc.cleaned$Stage_Binary <- as.factor(oscc.cleaned$Stage_Binary)
+
+```
+
+```{r}
+#Inspection of missing values
+colSums(is.na(oscc.cleaned))
+
+```
+
+```{r}
+oscc.cleaned <- na.omit(oscc.cleaned)
+
+```
+
+```{r}
+#Impute missing values
+library(mice)
+
+# Impute missing values using the mice package
+imputed_data <- mice(oscc.cleaned, m = 1, method = "pmm", seed = 123)
+
+# Replace the dataset with the imputed one
+oscc.cleaned <- complete(imputed_data)
+
+```
+
+```{r}
+#Rebuilding Random Forest plot
+rf_model <- randomForest(
+  Stage_Binary ~ ., 
+  data = oscc.cleaned, 
+  importance = TRUE, 
+  ntree = 500
+)
+
+```
+
+```{r}
+#Generating prediction
+pred_rf <- predict(rf_model, newdata = oscc.cleaned, type = "prob")[, 2]
+
+```
+
+```{r}
+#Compare ROC curves:
+library(pROC)
+
+# Logistic regression prediction
+pred_logistic <- predict(model, newdata = oscc.cleaned, type = "response")
+roc_logistic <- roc(as.numeric(oscc.cleaned$Stage_Binary), pred_logistic)
+
+# Random forest prediction
+roc_rf <- roc(as.numeric(oscc.cleaned$Stage_Binary), pred_rf)
+
+# Plot ROC curves
+plot(roc_logistic, col = "blue", main = "ROC Curve Comparison")
+lines(roc_rf, col = "red")
+legend("bottomright", legend = c("Logistic Regression", "Random Forest"),
+       col = c("blue", "red"), lwd = 2)
+
+```
+
+```{r}
+#Comparison Accuracy
+# Logistic regression accuracy
+logistic_pred <- ifelse(pred_logistic > 0.5, 1, 0)
+logistic_accuracy <- mean(logistic_pred == oscc.cleaned$Stage_Binary)
+
+# Random forest accuracy
+rf_pred <- predict(rf_model, newdata = oscc.cleaned, type = "response")
+rf_accuracy <- mean(rf_pred == oscc.cleaned$Stage_Binary)
+
+# Print accuracies
+cat("Logistic Regression Accuracy:", logistic_accuracy, "\n")
+cat("Random Forest Accuracy:", rf_accuracy, "\n")
+
+```
+
+#A logistic regression accuracy of \~57% indicates moderate predictive performance but room for improvement.A random forest accuracy of 100% suggests overfitting; the model may not generalize well to unseen data.Employ cross-validation, alternative metrics, and a test set to ensure your results are robust and reliable.
+
+```{r}
+library(ggplot2)
+
+# Boxplot of Late-stage diagnosis of OSCC by Race
+ggplot(summary, aes(x = Race.and.origin.recode..NHW..NHB..NHAIAN..NHAPI..Hispanic..x, 
+                         y = Late_Stage_Percentage)) +
+  geom_boxplot(fill = "lightblue", color = "blue") +
+  labs(
+    title = "Relationship of Late stage diagnosis of OSCC with Race",
+    x = "Race",
+    y = "Late-Stage Diagnosis %"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# Load the necessary packages
+library(dagitty)
+library(ggdag)
+
+# Define the DAG without comments
+dag <- dagitty('
+dag {
+  Age [exposure]
+  Race [exposure]
+  Sex [exposure]
+  Income [mediator]
+  Marital_Status [confounder]
+  Late_Stage_Diagnosis [outcome]
+  
+  Age -> Late_Stage_Diagnosis
+  Race -> Late_Stage_Diagnosis
+  Sex -> Late_Stage_Diagnosis
+  Marital_Status -> Late_Stage_Diagnosis
+  Race -> Income -> Late_Stage_Diagnosis
+  Sex -> Income -> Late_Stage_Diagnosis
+  Age -> Income
+  Marital_Status -> Income
+}
+')
+
+# Visualize the DAG
+ggdag(dag) +
+  theme_minimal() +
+  labs(title = "DAG for Factors Associated with Late-Stage Oral Cancer Diagnosis")
+
+
+```
+
